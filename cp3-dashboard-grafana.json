@@ -1,0 +1,336 @@
+[
+    {
+        "id": "f6f2187d.f17ca8",
+        "type": "tab",
+        "label": "Flow 1",
+        "disabled": false,
+        "info": ""
+    },
+    {
+        "id": "3cc11d24.ff01a2",
+        "type": "comment",
+        "z": "f6f2187d.f17ca8",
+        "name": "WARNING: please check you have started this container with a volume that is mounted to /data\\n otherwise any flow changes are lost when you redeploy or upgrade the container\\n (e.g. upgrade to a more recent node-red docker image).\\n  If you are using named volumes you can ignore this warning.\\n Double click or see info side panel to learn how to start Node-RED in Docker to save your work",
+        "info": "\nTo start docker with a bind mount volume (-v option), for example:\n\n```\ndocker run -it -p 1880:1880 -v /home/user/node_red_data:/data --name mynodered nodered/node-red\n```\n\nwhere `/home/user/node_red_data` is a directory on your host machine where you want to store your flows.\n\nIf you do not do this then you can experiment and redploy flows, but if you restart or upgrade the container the flows will be disconnected and lost. \n\nThey will still exist in a hidden data volume, which can be recovered using standard docker techniques, but that is much more complex than just starting with a named volume as described above.",
+        "x": 350,
+        "y": 80,
+        "wires": []
+    },
+    {
+        "id": "ae343f36f1cdf486",
+        "type": "mqtt in",
+        "z": "f6f2187d.f17ca8",
+        "name": "receber-sensores",
+        "topic": "fiap/CP3/grupo01/",
+        "qos": "0",
+        "datatype": "auto-detect",
+        "broker": "a5cf6aa80445364a",
+        "nl": false,
+        "rap": true,
+        "rh": 0,
+        "inputs": 0,
+        "x": 160,
+        "y": 220,
+        "wires": [
+            [
+                "908dbdc1588ee5fc"
+            ]
+        ]
+    },
+    {
+        "id": "908dbdc1588ee5fc",
+        "type": "json",
+        "z": "f6f2187d.f17ca8",
+        "name": "converter-json",
+        "property": "payload",
+        "action": "obj",
+        "pretty": false,
+        "x": 360,
+        "y": 280,
+        "wires": [
+            [
+                "6e0ba4378c5e3fc1",
+                "7cd1985214a97c70",
+                "cb542476ecbc225a"
+            ]
+        ]
+    },
+    {
+        "id": "6e0ba4378c5e3fc1",
+        "type": "debug",
+        "z": "f6f2187d.f17ca8",
+        "name": "dados-dos-sensores",
+        "active": true,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": false,
+        "complete": "payload",
+        "targetType": "msg",
+        "statusVal": "",
+        "statusType": "auto",
+        "x": 600,
+        "y": 280,
+        "wires": []
+    },
+    {
+        "id": "7cd1985214a97c70",
+        "type": "function",
+        "z": "f6f2187d.f17ca8",
+        "name": "preparar-influx",
+        "func": "const d = msg.payload;\n\nconst numero = v =>\n    typeof v === \"number\" && Number.isFinite(v);\n\n// Impede que Injects e mensagens fora do formato sejam gravados.\nif (\n    !d ||\n    typeof d !== \"object\" ||\n    Array.isArray(d) ||\n    typeof d.grupo !== \"string\" ||\n    typeof d.dispositivo !== \"string\"\n) {\n    node.warn(\"Mensagem ignorada: nao e um objeto de sensores.\");\n    return null;\n}\n\n// Filtra a equipe e o dispositivo deste projeto.\nif (\n    d.grupo !== \"grupo01\" ||\n    d.dispositivo !== \"esp32-grupo01-01\"\n) {\n    return null;\n}\n\nconst token = env.get(\"INFLUX_TOKEN\");\n\nif (!token) {\n    node.error(\n        \"INFLUX_TOKEN nao foi definido no container Node-RED.\"\n    );\n    return null;\n}\n\nconst escaparTag = valor =>\n    String(valor)\n        .replace(/\\\\/g, \"\\\\\\\\\")\n        .replace(/ /g, \"\\\\ \")\n        .replace(/,/g, \"\\\\,\")\n        .replace(/=/g, \"\\\\=\");\n\n// Limiares iniciais do projeto\nconst presenca =\n    d.distancia_valida === true &&\n    numero(d.distancia_cm) &&\n    d.distancia_cm >= 2 &&\n    d.distancia_cm <= 100;\n\nconst movimento =\n    numero(d.amostras_aceleracao) &&\n    d.amostras_aceleracao > 0 &&\n    numero(d.aceleracao_desvio_pico_ms2) &&\n    d.aceleracao_desvio_pico_ms2 >= 3.0;\n\nconst temperaturaValida =\n    d.temperatura_valida === true &&\n    numero(d.temperatura_c);\n\nconst temperaturaBaixa =\n    temperaturaValida &&\n    d.temperatura_c <= 15;\n\nconst temperaturaAlta =\n    temperaturaValida &&\n    d.temperatura_c >= 30;\n\nconst alarme =\n    (presenca && movimento) ||\n    temperaturaBaixa ||\n    temperaturaAlta;\n\nconst campos = [];\n\nif (temperaturaValida) {\n    campos.push(`temperatura_c=${d.temperatura_c}`);\n}\n\nif (\n    d.temperatura_valida === true &&\n    numero(d.umidade_pct)\n) {\n    campos.push(`umidade_pct=${d.umidade_pct}`);\n}\n\nif (\n    d.distancia_valida === true &&\n    numero(d.distancia_cm)\n) {\n    campos.push(`distancia_cm=${d.distancia_cm}`);\n}\n\nif (\n    d.amostras_aceleracao > 0 &&\n    numero(d.aceleracao_desvio_pico_ms2)\n) {\n    campos.push(\n        `movimento_pico_ms2=${d.aceleracao_desvio_pico_ms2}`\n    );\n}\n\nif (campos.length === 0) {\n    node.warn(\"Mensagem sem leituras validas. Nao foi gravada.\");\n    return null;\n}\n\ncampos.push(`presenca=${presenca ? 1 : 0}`);\ncampos.push(`movimento=${movimento ? 1 : 0}`);\ncampos.push(`alarme=${alarme ? 1 : 0}`);\n\nmsg.headers = {\n    Authorization: \"Token \" + token,\n    \"Content-Type\": \"text/plain; charset=utf-8\"\n};\n\nmsg.payload =\n    `sensores,grupo=${escaparTag(d.grupo)},` +\n    `dispositivo=${escaparTag(d.dispositivo)} ` +\n    campos.join(\",\") +\n    ` ${Date.now()}`;\n\nreturn msg;",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 580,
+        "y": 340,
+        "wires": [
+            [
+                "8da0fa0be9eeb530"
+            ]
+        ]
+    },
+    {
+        "id": "8da0fa0be9eeb530",
+        "type": "http request",
+        "z": "f6f2187d.f17ca8",
+        "name": "",
+        "method": "POST",
+        "ret": "txt",
+        "paytoqs": "ignore",
+        "url": "http://influxdb:8086/api/v2/write?org=fiap&bucket=cp3&precision=ms",
+        "tls": "",
+        "persist": false,
+        "proxy": "",
+        "insecureHTTPParser": false,
+        "authType": "",
+        "senderr": false,
+        "headers": [],
+        "x": 820,
+        "y": 340,
+        "wires": [
+            [
+                "02315e7b7f1c0f8f"
+            ]
+        ]
+    },
+    {
+        "id": "02315e7b7f1c0f8f",
+        "type": "debug",
+        "z": "f6f2187d.f17ca8",
+        "name": "resultado-influx",
+        "active": true,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": false,
+        "complete": "true",
+        "targetType": "full",
+        "statusVal": "",
+        "statusType": "auto",
+        "x": 1040,
+        "y": 340,
+        "wires": []
+    },
+    {
+        "id": "cb542476ecbc225a",
+        "type": "function",
+        "z": "f6f2187d.f17ca8",
+        "name": "gatilho-foto",
+        "func": "const d = msg.payload;\n\nconst numero = v =>\n    typeof v === \"number\" && Number.isFinite(v);\n\nif (\n    !d ||\n    typeof d !== \"object\" ||\n    d.grupo !== \"grupo01\" ||\n    d.dispositivo !== \"esp32-grupo01-01\"\n) {\n    return null;\n}\n\nconst limites = {\n    distanciaMin: 2,\n    distanciaMax: 100,\n    movimento: 3,\n    temperaturaMin: 15,\n    temperaturaMax: 30\n};\n\nconst presenca =\n    d.distancia_valida === true &&\n    numero(d.distancia_cm) &&\n    d.distancia_cm >= limites.distanciaMin &&\n    d.distancia_cm <= limites.distanciaMax;\n\nconst movimento =\n    d.amostras_aceleracao > 0 &&\n    numero(d.aceleracao_desvio_pico_ms2) &&\n    d.aceleracao_desvio_pico_ms2 >= limites.movimento;\n\nconst temperaturaValida =\n    d.temperatura_valida === true &&\n    numero(d.temperatura_c);\n\nconst motivos = [];\n\nif (presenca && movimento) {\n    motivos.push(\"presenca_e_movimento\");\n}\n\nif (\n    temperaturaValida &&\n    d.temperatura_c <= limites.temperaturaMin\n) {\n    motivos.push(\"temperatura_baixa\");\n}\n\nif (\n    temperaturaValida &&\n    d.temperatura_c >= limites.temperaturaMax\n) {\n    motivos.push(\"temperatura_alta\");\n}\n\nif (motivos.length === 0) {\n    return null;\n}\n\nconst agora = Date.now();\nconst ultimaTentativa = context.get(\"ultimaTentativa\") || 0;\n\nif (agora - ultimaTentativa < 10000) {\n    return null;\n}\n\ncontext.set(\"ultimaTentativa\", agora);\n\nconst id = `${d.grupo}_${agora}_${d.sequencia}`;\n\nmsg.filename = `/data/files/${id}.jpg`;\n\nmsg.evento = {\n    id,\n    solicitado_em: new Date(agora).toISOString(),\n    motivos,\n    limites,\n    sensores: d,\n    arquivo_imagem: msg.filename\n};\n\nnode.status({\n    fill: \"yellow\",\n    shape: \"dot\",\n    text: motivos.join(\", \")\n});\n\nreturn msg;",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 570,
+        "y": 400,
+        "wires": [
+            [
+                "bbdde7b37d477e90"
+            ]
+        ]
+    },
+    {
+        "id": "bbdde7b37d477e90",
+        "type": "http request",
+        "z": "f6f2187d.f17ca8",
+        "name": "",
+        "method": "GET",
+        "ret": "bin",
+        "paytoqs": "ignore",
+        "url": "https://picsum.photos/640/480",
+        "tls": "",
+        "persist": false,
+        "proxy": "",
+        "insecureHTTPParser": false,
+        "authType": "",
+        "senderr": false,
+        "headers": [],
+        "x": 680,
+        "y": 480,
+        "wires": [
+            [
+                "b4dff80de9b80ff7"
+            ]
+        ]
+    },
+    {
+        "id": "b4dff80de9b80ff7",
+        "type": "function",
+        "z": "f6f2187d.f17ca8",
+        "name": "validar-foto",
+        "func": "const b = msg.payload;\n\nif (\n    msg.statusCode !== 200 ||\n    !Buffer.isBuffer(b) ||\n    b.length < 4 ||\n    b[0] !== 0xFF ||\n    b[1] !== 0xD8\n) {\n    node.error(\n        `Foto invalida. HTTP: ${msg.statusCode}`\n    );\n\n    return null;\n}\n\nmsg.evento.recebido_em = new Date().toISOString();\nmsg.evento.tamanho_bytes = b.length;\n\nreturn msg;",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 810,
+        "y": 400,
+        "wires": [
+            [
+                "6a6f52636a2d0b0f"
+            ]
+        ]
+    },
+    {
+        "id": "6a6f52636a2d0b0f",
+        "type": "file",
+        "z": "f6f2187d.f17ca8",
+        "name": "salvar-imagem",
+        "filename": "filename",
+        "filenameType": "msg",
+        "appendNewline": false,
+        "createDir": true,
+        "overwriteFile": "true",
+        "encoding": "none",
+        "x": 940,
+        "y": 480,
+        "wires": [
+            [
+                "8b7bc6a559a0e373"
+            ]
+        ]
+    },
+    {
+        "id": "8b7bc6a559a0e373",
+        "type": "function",
+        "z": "f6f2187d.f17ca8",
+        "name": "registrar-captura",
+        "func": "// Este nó recebe a mensagem depois da gravação da imagem.\nflow.set(\"ultimaFoto\", msg.payload);\nflow.set(\"ultimoEventoFoto\", msg.evento);\n\nnode.status({\n    fill: \"green\",\n    shape: \"dot\",\n    text: \"Imagem salva\"\n});\n\nmsg.filename = `/data/files/${msg.evento.id}.json`;\nmsg.payload = JSON.stringify(msg.evento, null, 2);\n\n// Remove dados da resposta HTTP que não são necessários.\ndelete msg.headers;\n\nreturn msg;",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 1080,
+        "y": 400,
+        "wires": [
+            [
+                "0778e78f611ed9f0"
+            ]
+        ]
+    },
+    {
+        "id": "0778e78f611ed9f0",
+        "type": "file",
+        "z": "f6f2187d.f17ca8",
+        "name": "salvar-contexto",
+        "filename": "filename",
+        "filenameType": "msg",
+        "appendNewline": false,
+        "createDir": true,
+        "overwriteFile": "true",
+        "encoding": "none",
+        "x": 1220,
+        "y": 480,
+        "wires": [
+            []
+        ]
+    },
+    {
+        "id": "052673b162b4a607",
+        "type": "http in",
+        "z": "f6f2187d.f17ca8",
+        "name": "visualizar-ultima-foto",
+        "url": "/ultima-foto",
+        "method": "get",
+        "upload": false,
+        "skipBodyParsing": false,
+        "swaggerDoc": "",
+        "x": 190,
+        "y": 540,
+        "wires": [
+            [
+                "ffd82f752637b505"
+            ]
+        ]
+    },
+    {
+        "id": "ffd82f752637b505",
+        "type": "function",
+        "z": "f6f2187d.f17ca8",
+        "name": "obter-ultima-foto",
+        "func": "const foto = flow.get(\"ultimaFoto\");\n\nmsg.headers = {\n    \"Cache-Control\": \"no-store\"\n};\n\nif (!Buffer.isBuffer(foto)) {\n    msg.statusCode = 404;\n    msg.headers[\"Content-Type\"] = \"text/plain; charset=utf-8\";\n    msg.payload = \"Ainda nao houve captura nesta execucao.\";\n    return msg;\n}\n\nmsg.statusCode = 200;\nmsg.headers[\"Content-Type\"] = \"image/jpeg\";\nmsg.payload = foto;\n\nreturn msg;",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 440,
+        "y": 540,
+        "wires": [
+            [
+                "f0d9782cb0724488"
+            ]
+        ]
+    },
+    {
+        "id": "f0d9782cb0724488",
+        "type": "http response",
+        "z": "f6f2187d.f17ca8",
+        "name": "",
+        "statusCode": "",
+        "headers": {},
+        "x": 670,
+        "y": 540,
+        "wires": []
+    },
+    {
+        "id": "a5cf6aa80445364a",
+        "type": "mqtt-broker",
+        "name": "Broker CP3",
+        "broker": "broker.hivemq.com",
+        "port": 1883,
+        "clientid": "",
+        "autoConnect": true,
+        "usetls": false,
+        "protocolVersion": 4,
+        "keepalive": 60,
+        "cleansession": true,
+        "autoUnsubscribe": true,
+        "birthTopic": "",
+        "birthQos": "0",
+        "birthRetain": "false",
+        "birthPayload": "",
+        "birthMsg": {},
+        "closeTopic": "",
+        "closeQos": "0",
+        "closeRetain": "false",
+        "closePayload": "",
+        "closeMsg": {},
+        "willTopic": "",
+        "willQos": "0",
+        "willRetain": "false",
+        "willPayload": "",
+        "willMsg": {},
+        "userProps": "",
+        "sessionExpiry": ""
+    }
+]
