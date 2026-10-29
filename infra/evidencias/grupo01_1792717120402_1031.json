@@ -1,0 +1,37 @@
+{
+  "id": "grupo01_1792717120402_1031",
+  "solicitado_em": "2026-10-23T00:58:40.402Z",
+  "motivos": [
+    "temperatura_alta"
+  ],
+  "limites": {
+    "distanciaMin": 2,
+    "distanciaMax": 100,
+    "movimento": 3,
+    "temperaturaMin": 15,
+    "temperaturaMax": 30
+  },
+  "sensores": {
+    "grupo": "grupo01",
+    "dispositivo": "esp32-grupo01-01",
+    "uptime_ms": 1036906,
+    "sequencia": 1031,
+    "janela_ms": 1000,
+    "temperatura_valida": true,
+    "temperatura_c": 36.3,
+    "umidade_pct": 71.5,
+    "distancia_valida": true,
+    "distancia_cm": 117.59,
+    "aceleracao_valida": true,
+    "ax_ms2": 0.49,
+    "ay_ms2": 19.61,
+    "az_ms2": 1.47,
+    "aceleracao_total_ms2": 19.67,
+    "aceleracao_desvio_ms2": 9.87,
+    "aceleracao_desvio_pico_ms2": 9.87,
+    "amostras_aceleracao": 48
+  },
+  "arquivo_imagem": "/data/files/grupo01_1792717120402_1031.jpg",
+  "recebido_em": "2026-10-23T00:58:40.940Z",
+  "tamanho_bytes": 25146
+}
